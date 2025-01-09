@@ -104,7 +104,7 @@ class PlaylistMonitor(Thread):
         self.interval = interval
         self.current_playlist_id = None
         self.running = True
-        self.background_music = "/downloads/Beat.mp3"  # Path to background music
+        self.background_music = "downloads/Beat.mp3"  # Path to background music
 
     def fetch_latest_playlist_id(self):
         try:
@@ -148,20 +148,37 @@ class PlaylistMonitor(Thread):
 
                     # Fetch the media list and update images and audio
                     media_list = self.fetch_media_list(latest_playlist_id)
+                    image_urls_list = []
+                    audio_urls_list = []
+
                     for media in media_list:
-                        image_urls = media.get("images", [])
-                        print("this is", image_urls)
-                        audio_url = media.get("audio", "")
+                        image_urls_list.append(media.get("images", []))
+                        audio_urls_list.append(media.get("audio", ""))
 
-                        # Update images
-                        self.viewer.signal.update_images.emit(image_urls)
+                    # Loop through images and play audio
+                    while self.running:
+                        for idx, image_urls in enumerate(image_urls_list):
+                            audio_url = audio_urls_list[idx]
 
-                        # Play audio if available
-                        if audio_url:
-                            self.download_audio(audio_url)
-                            self.play_audio(audio_url, background_channel)  # Pass the background_channel here
-                            # Cycle images while audio is playing
-                            self.cycle_images(image_urls)
+                            # Update images
+                            self.viewer.signal.update_images.emit(image_urls)
+
+                            # Play audio if available
+                            if audio_url:
+                                self.download_audio(audio_url)
+                                self.play_audio(audio_url, background_channel)  # Pass the background_channel here
+                                # Get the duration of the audio
+                                audio_filename = os.path.join("downloads/audio", audio_url.split("/")[-1])
+                                sound = pygame.mixer.Sound(audio_filename)
+                                audio_duration = sound.get_length()  # Duration of the audio
+
+                                # Display image for the duration of the audio
+                                time.sleep(audio_duration + 2)  # Display image for the audio duration plus 2 seconds
+
+                        # After looping through the images and audio, restart from the beginning
+                        print("Playlist cycle complete, restarting...")
+                        time.sleep(self.interval)
+
                 else:
                     image_urls = []
                     self.viewer.signal.update_images.emit(image_urls)
@@ -215,12 +232,6 @@ class PlaylistMonitor(Thread):
             background_channel.set_volume(1.0)  # Restore full volume
         except Exception as e:
             print(f"Error playing audio: {e}")
-
-    def cycle_images(self, image_urls):
-        # Implement logic to cycle through images while audio is playing
-        for url in image_urls:
-            print(f"Displaying image: {url}")
-            time.sleep(5)  # Sleep for 5 seconds before showing the next image
 
 def main():
     app = QApplication(sys.argv)
