@@ -234,9 +234,6 @@ class PlaylistMonitor(Thread):
 
             # Restore the background music volume
             background_channel.set_volume(1.0)  # Restore full volume
-
-            return True
-            
         except Exception as e:
             print(f"Error playing audio: {e}")
 
