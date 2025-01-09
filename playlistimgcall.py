@@ -163,6 +163,10 @@ class PlaylistMonitor(Thread):
                             # Update images
                             self.viewer.signal.update_images.emit(image_urls)
 
+                            # Introduce a delay before playing the audio (e.g., 2 seconds)
+                            delay_before_audio = 1  # Adjust delay as needed
+                            time.sleep(delay_before_audio)
+
                             # Play audio if available
                             if audio_url:
                                 self.download_audio(audio_url)
@@ -242,6 +246,7 @@ def main():
 
     # Start the playlist monitor
     monitor = PlaylistMonitor(viewer, interval=10)  # Check every 10 seconds
+    monitor.daemon = True  # Make this a daemon thread
     monitor.start()
 
     # Ensure the monitor thread stops when the app closes
