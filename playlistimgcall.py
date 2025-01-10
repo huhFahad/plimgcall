@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout, QWid
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from io import BytesIO
+import json
 
 # Replace with your API URLs
 API_GET_LATEST_PLAYLIST = "https://cloudbases.in/demoplatform/Robo/Robo_api/api_get_latest_playlist_id/1"
@@ -46,9 +47,11 @@ class ImageViewer(QMainWindow):
     def fetch_image(self, url_or_path):
         try:
             # Check if the input is a local file path
-            if os.path.exists(url_or_path):
-                print(f"Loading image from local: {url_or_path}")
-                return QPixmap(url_or_path)
+            local_image_path = os.path.join("downloads/images", url_or_path.split("/")[-1])
+            
+            if os.path.exists(local_image_path):
+                print(f"Loading image from local: {local_image_path}")
+                return QPixmap(local_image_path)
             else:
                 print(f"Attempting to download image: {url_or_path}")
                 # Treat it as a URL and download the image
@@ -57,17 +60,15 @@ class ImageViewer(QMainWindow):
                 image_data = BytesIO(response.content)
 
                 # Save the image to disk for future use
-                filename = os.path.join("downloads/images", url_or_path.split("/")[-1])
-                with open(filename, "wb") as f:
+                with open(local_image_path, "wb") as f:
                     f.write(image_data.read())
 
-                print(f"Image downloaded and saved: {filename}")
-                return QPixmap(filename)
+                print(f"Image downloaded and saved: {local_image_path}")
+                return QPixmap(local_image_path)
         except Exception as e:
             print(f"Error fetching image from {url_or_path}: {e}")
             # Return the default image if there's an error
             return QPixmap(self.default_image_path)
-
 
     def update_image_display(self, image_urls):
         # Clear existing images
@@ -127,6 +128,51 @@ class PlaylistMonitor(Thread):
             print(f"Error fetching media list: {e}")
             return []
 
+    def save_playlist_data(self, playlist_id, media_list):
+        data = {
+            "playlist_id": playlist_id,
+            "media_list": media_list
+        }
+        
+        # Remove the old playlist data if it exists
+        if os.path.exists("playlist_data.json"):
+            os.remove("playlist_data.json")
+
+        with open("playlist_data.json", "w") as f:
+            json.dump(data, f)
+        print(f"Playlist {playlist_id} saved locally.")
+
+    def load_playlist_data(self):
+        try:
+            with open("playlist_data.json", "r") as f:
+                data = json.load(f)
+                print(f"Loaded playlist data for ID: {data['playlist_id']}")
+                return data["playlist_id"], data["media_list"]
+        except Exception as e:
+            print(f"Error loading playlist data: {e}")
+            return None, None
+
+    def play_media_list(self, media_list, background_channel):
+        for media in media_list:
+            image_urls = media.get("images", [])
+            audio_url = media.get("audio", "")
+
+            # Update images
+            self.viewer.signal.update_images.emit(image_urls)
+
+            # Play audio if available
+            if audio_url:
+                self.download_audio(audio_url)
+                self.play_audio(audio_url, background_channel)  # Pass the background_channel here
+
+                # Get the duration of the audio
+                audio_filename = os.path.join("downloads/audio", audio_url.split("/")[-1])
+                sound = pygame.mixer.Sound(audio_filename)
+                audio_duration = sound.get_length()  # Duration of the audio
+
+                # Display image for the duration of the audio
+                time.sleep(audio_duration + 2)  # Display image for the audio duration plus 2 seconds
+
     def run(self):
         # Initialize pygame mixer
         pygame.mixer.init()
@@ -140,52 +186,37 @@ class PlaylistMonitor(Thread):
 
         while self.running:
             try:
-                # Check for latest playlist ID
+                # Load the saved playlist ID and media if available
+                self.current_playlist_id, media_list = self.load_playlist_data()
+
+                # If no playlist loaded or network is available, check for a new playlist
                 latest_playlist_id = self.fetch_latest_playlist_id()
-                if latest_playlist_id and latest_playlist_id != self.current_playlist_id:
-                    print(f"New playlist detected: {latest_playlist_id}")
-                    self.current_playlist_id = latest_playlist_id
+                print(f"latest_playlist_id : {latest_playlist_id}")
+                print(f"current_playlist_id : {self.current_playlist_id}")
 
-                    # Fetch the media list and update images and audio
-                    media_list = self.fetch_media_list(latest_playlist_id)
-                    image_urls_list = []
-                    audio_urls_list = []
+                if latest_playlist_id:
+                    # If a new playlist ID is fetched, and it differs from the current one, play it
+                    if latest_playlist_id != self.current_playlist_id:
+                        print(f"New playlist detected: {latest_playlist_id}")
+                        self.current_playlist_id = latest_playlist_id
 
-                    for media in media_list:
-                        image_urls_list.append(media.get("images", []))
-                        audio_urls_list.append(media.get("audio", ""))
+                        # Fetch the media list for the new playlist and play it
+                        media_list = self.fetch_media_list(latest_playlist_id)
+                        self.save_playlist_data(latest_playlist_id, media_list)
+                        self.play_media_list(media_list, background_channel)
 
-                    # Loop through images and play audio
-                    while self.running:
-                        for idx, image_urls in enumerate(image_urls_list):
-                            audio_url = audio_urls_list[idx]
-
-                            # Update images
-                            self.viewer.signal.update_images.emit(image_urls)
-
-                            # Introduce a delay before playing the audio (e.g., 2 seconds)
-                            delay_before_audio = 1  # Adjust delay as needed
-                            time.sleep(delay_before_audio)
-
-                            # Play audio if available
-                            if audio_url:
-                                self.download_audio(audio_url)
-                                self.play_audio(audio_url, background_channel)  # Pass the background_channel here
-                                # Get the duration of the audio
-                                audio_filename = os.path.join("downloads/audio", audio_url.split("/")[-1])
-                                sound = pygame.mixer.Sound(audio_filename)
-                                audio_duration = sound.get_length()  # Duration of the audio
-
-                                # Display image for the duration of the audio
-                                time.sleep(audio_duration + 2)  # Display image for the audio duration plus 2 seconds
-
-                        # After looping through the images and audio, restart from the beginning
-                        print("Playlist cycle complete, restarting...")
-                        time.sleep(self.interval)
+                    else:
+                        print("No new ID fetched. Falling back to the last playlist.")
+                        if self.current_playlist_id:
+                            # Fallback to the last known playlist if no new ID is found
+                            self.play_media_list(media_list, background_channel)
 
                 else:
-                    image_urls = []
-                    self.viewer.signal.update_images.emit(image_urls)
+                    # No playlist ID fetched, waiting for the network
+                    print("No playlist available. Waiting for network connection...")
+                    if self.current_playlist_id:
+                        # Fallback to the last known playlist if no new ID is found
+                        self.play_media_list(media_list, background_channel)
 
             except Exception as e:
                 print(f"Error in monitoring: {e}")
